@@ -1,4 +1,4 @@
-# $Id: /mirror/youri/soft/Media/trunk/lib/Youri/Media/URPM.pm 2240 2007-03-05T22:09:50.430813Z guillomovitch  $
+# $Id: /mirror/youri/soft/Media/trunk/lib/Youri/Media/URPM.pm 2336 2007-03-23T09:11:26.464388Z guillomovitch  $
 package Youri::Media::URPM;
 
 =head1 NAME
@@ -19,10 +19,16 @@ use strict;
 use warnings;
 use Carp;
 use File::Find;
-use File::Temp ();
+use File::Temp qw/tempfile/;
 use LWP::Simple;
 use URPM;
 use Youri::Package::RPM::URPM;
+
+use constant {
+    NONE    => 0,
+    PARTIAL => 1,
+    FULL    => 2
+};
 
 use base 'Youri::Media';
 
@@ -60,6 +66,15 @@ Maximum age of packages for this media.
 
 rpmlint configuration file for this media.
 
+=item preload $level
+
+Allows to parse headers at object creation, rather than lazily if really needed.
+(default: Youri::Media::URPM::None)
+
+=item cache true/false
+
+Cache headers once parsed (default: true)
+
 =back
 
 In case of multiple B<synthesis>, B<hdlist> and B<path> options given, they
@@ -71,9 +86,11 @@ sub _init {
     my $self   = shift;
 
     my %options = (
-        hdlist         => '',    # hdlist from which to create this media
-        synthesis      => '',    # synthesis from which to create this media
-        path           => '',    # directory from which to create this media
+        hdlist    => '',
+        synthesis => '',
+        path      => '',
+        preload   => NONE,
+        cache     => 1,
         @_
     );
 
@@ -89,7 +106,6 @@ sub _init {
     }
 
     # find source
-    my $urpm = URPM->new();
     SOURCE: {
         if ($options{synthesis}) {
             foreach my $file (
@@ -97,11 +113,9 @@ sub _init {
                     @{$options{synthesis}} :
                     $options{synthesis}
             ) {
-                print "Attempting to retrieve synthesis $file\n"
-                    if $options{verbose};
                 my $synthesis = $self->_get_file($file);
                 if ($synthesis) {
-                    $urpm->parse_synthesis($synthesis, keep_all_tags => 1);
+                    $self->{_synthesis} = $synthesis;
                     last SOURCE;
                 }
             }
@@ -113,11 +127,8 @@ sub _init {
                     @{$options{hdlist}} :
                     $options{hdlist}
             ) {
-                print "Attempting to retrieve hdlist $file\n"
-                    if $options{verbose};
                 my $hdlist = $self->_get_file($file);
                 if ($hdlist) {
-                    $urpm->parse_hdlist($hdlist, keep_all_tags => 1);
                     $self->{_hdlist} = $hdlist;
                     last SOURCE;
                 }
@@ -125,27 +136,20 @@ sub _init {
         }
 
         if ($self->{_path}) {
-            print "Attempting to scan directory $self->{_path}\n"
-                if $options{verbose};
-
-                my $pattern = qr/\.rpm$/;
-
-            my $parse = sub {
-                return unless -f $File::Find::name;
-                return unless -r $File::Find::name;
-                return unless $_ =~ $pattern;
-
-                $urpm->parse_rpm($File::Find::name, keep_all_tags => 1);
-            };
-
-            find($parse, $self->{_path});
             last SOURCE;
         }
         
         croak "no source specified";
     }
 
-    $self->{_urpm}           = $urpm;
+    if ($options{preload} && !$options{cache}) {
+        carp "Forcing caching as preloading specified\n";
+        $options{cache} = 1;
+    }
+
+    $self->_parse_headers($options{preload}) if $options{preload};
+    $self->{_level} = $options{preload};
+    $self->{_cache} = $options{cache};
 
     return $self;
 }
@@ -197,11 +201,92 @@ sub traverse_headers {
     my ($self, $function) = @_;
     croak "Not a class method" unless ref $self;
 
+    # lazy initialisation
+    if ($self->{_level} < PARTIAL) {
+        $self->_parse_headers(PARTIAL);
+        $self->{_level} = PARTIAL;
+    }
+
     $self->{_urpm}->traverse(sub {
         $function->(Youri::Package::RPM::URPM->new(header => $_[0]));
     });
-    
+
+    # remove headers if needed
+    if (!$self->{_cache}) {
+        $self->{_urpm} = undef;
+        $self->{_level} = NONE;
+    }
 }
+
+sub traverse_full_headers {
+    my ($self, $function) = @_;
+    croak "Not a class method" unless ref $self;
+
+    # lazy initialisation
+    if ($self->{_level} < FULL) {
+        $self->_parse_headers(FULL);
+        $self->{_level} = FULL;
+    }
+
+    $self->{_urpm}->traverse(sub {
+        $function->(Youri::Package::RPM::URPM->new(header => $_[0]));
+    });
+
+    # remove headers if needed
+    if (!$self->{_cache}) {
+        $self->{_urpm} = undef;
+        $self->{_level} = NONE;
+    }
+}
+
+sub _parse_headers {
+    my ($self, $level) = @_;
+
+    # return if level is NONE
+    return unless $level;
+
+    $self->{_urpm} = URPM->new();
+    CASE: {
+        if ($self->{_synthesis}) {
+            print "Parsing synthesis $self->{_synthesis}\n"
+                if $self->{_verbose};
+            $self->{_urpm}->parse_synthesis(
+                $self->{_synthesis}, keep_all_tags => ($level == FULL)
+            );
+            last CASE;
+        }
+
+        if ($self->{_hdlist}) {
+            print "Parsing hdlist $self->{_hdlist}\n"
+                if $self->{_verbose};
+            $self->{_urpm}->parse_hdlist(
+                $self->{_hdlist}, keep_all_tags => ($level == FULL)
+            );
+            last CASE;
+        }
+
+        if ($self->{_path}) {
+            print "Parsing directory $self->{_path} content\n"
+                if $self->{_verbose};
+
+            my $pattern = qr/\.rpm$/;
+
+            my $parse = sub {
+                return unless -f $File::Find::name;
+                return unless -r $File::Find::name;
+                return unless $_ =~ $pattern;
+
+                $self->{_urpm}->parse_rpm(
+                    $File::Find::name, keep_all_tags => ($level == FULL)
+                );
+            };
+
+            find($parse, $self->{_path});
+            last CASE;
+        }
+    }
+}
+
 
 =head1 INSTANCE METHODS
 
@@ -235,13 +320,14 @@ sub _get_file {
     my ($self, $file) = @_;
 
     if ($file =~ /^(?:http|ftp):\/\/.*$/) {
-        my $tempfile = File::Temp->new();
-        my $status = getstore($file, $tempfile->filename());
+        my ($handle, $name) = tempfile(UNLINK =>1 );
+        print "Attempting to download $file as $name\n" if $self->{_verbose};
+        my $status = getstore($file, $name);
         unless (is_success($status)) {
             carp "invalid URL $file: $status";
             return;
         }
-        return $tempfile;
+        return $name;
     } else {
         unless (-f $file) {
             carp "non-existing file $file";

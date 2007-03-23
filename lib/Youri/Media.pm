@@ -1,4 +1,4 @@
-# $Id: /mirror/youri/soft/Media/trunk/lib/Youri/Media.pm 2230 2007-03-05T21:32:43.256766Z guillomovitch  $
+# $Id: /mirror/youri/soft/Media/trunk/lib/Youri/Media.pm 2329 2007-03-22T21:04:45.027891Z guillomovitch  $
 package Youri::Media;
 
 =head1 NAME
@@ -14,7 +14,7 @@ This abstract class defines Youri::Media interface.
 use Carp;
 use strict;
 use warnings;
-use version; our $VERSION = qv('0.1.0');
+use version; our $VERSION = qv('0.2.0');
 
 =head1 CLASS METHODS
 
@@ -100,6 +100,7 @@ sub new {
 
     my $self = bless {
         _id         => $options{id}, 
+        _verbose    => $options{verbose}, 
         _name       => $options{name} || $options{id}, 
         _type       => $options{type}, 
         _options    => $options{options}, 
@@ -243,7 +244,11 @@ Apply given function to all files of this media.
 
 =head2 traverse_headers($function)
 
-Apply given function to all headers of this media.
+Apply given function to all headers, partially parsed, of this media.
+
+=head2 traverse_full_headers($function)
+
+Apply given function to all headers, fully parsed, of this media.
 
 =head1 SUBCLASSING
 
@@ -252,6 +257,8 @@ The following methods have to be implemented:
 =over
 
 =item traverse_headers
+
+=item traverse_full_headers
 
 =item traverse_files
 

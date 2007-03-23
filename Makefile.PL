@@ -6,9 +6,11 @@ WriteMakefile(
     VERSION_FROM => 'lib/Youri/Media.pm',
     AUTHOR       => 'Youri project <youri@zarb.org>',
     PREREQ_PM  => {
-        'Youri::Package' => 0,
-        'LWP::Simple'    => 0,
-        'URPM'           => 0,
+        'Youri::Package'            => 0,
+        'LWP::Simple'               => 0,
+        'URPM'                      => 0,
+        'Youri::Package::RPM::URPM' => 0,
+        'version'                   => 0
     }
 );
 
