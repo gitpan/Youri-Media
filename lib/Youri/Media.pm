@@ -1,4 +1,4 @@
-# $Id: /mirror/youri/soft/Media/trunk/lib/Youri/Media.pm 2329 2007-03-22T21:04:45.027891Z guillomovitch  $
+# $Id: /mirror/youri/soft/Media/trunk/lib/Youri/Media.pm 2367 2007-04-22T18:47:34.552172Z guillomovitch  $
 package Youri::Media;
 
 =head1 NAME
@@ -14,7 +14,7 @@ This abstract class defines Youri::Media interface.
 use Carp;
 use strict;
 use warnings;
-use version; our $VERSION = qv('0.2.0');
+use version; our $VERSION = qv('0.2.1');
 
 =head1 CLASS METHODS
 
